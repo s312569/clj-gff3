@@ -36,7 +36,8 @@ user> (with-open [r (gff-reader tf)]
 "WormBase_imported", :type "gene", :start "25", :end "387", :score
 ".", :strand "-", :phase ".", :attributes {:ID ["gene:NECAME_00001"],
 :Name ["NECAME_00001"], :Note ["NOVEL protein_coding"], :Alias
-["NECAME_00001"]}}) ```
+["NECAME_00001"]}})
+```
 
 `gffDirective` records correspond to lines beginning with `##`. When
 filtering entries the `resolved?` function returns true when the
@@ -80,7 +81,8 @@ SV=1", :alphabet :iupacAminoAcids, :sequence [\M \K \T \L \L \L \T \L
 \V \L \V \T \I \V \C \L \D \L \G \Y \T \L \T \C \L \I \C \P \K \K \Y
 \C \N \Q \V \H \T \C \R \N \G \E \N \L \C \I \K \T \F \Y \E \G \N \L
 \L \G \K \Q \F \K \R \G \C \A \A \T \C \P \E \A \R \P \R \E \I \V \E
-\C \C \S \R \D \K \C \N \H]} ```
+\C \C \S \R \D \K \C \N \H]}
+```
 
 ## License
 
