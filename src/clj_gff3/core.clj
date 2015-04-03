@@ -141,7 +141,8 @@
             (concat fi
                     (take-while #(not (or (gene? %)
                                           (resolved? %)))
-                                (rest es))))]
+                                (drop-while #(or (gene? %) (seq-region? %))
+                                            es))))]
     (if (seq y)
       {:yield y :remaining r}
       {:end true})))
