@@ -12,8 +12,12 @@ To get from Clojars put the following in your project.clj file:
 
 To use require in your app:
 
+```clojure
 (ns my-app.core
     (:require [clj-gff.core :as gf]))
+```
+
+API docs can be found [here](http://s312569.github.io/clj-gff3/)
 
 ## Usage
 
