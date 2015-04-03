@@ -83,7 +83,7 @@
   (resolved? [this] (= :resolved (:name this))))
 
 (defn seq-region?
-  "Returns true if gffDirective is a sequence-region directive."
+  "Returns true if argument is a sequence-region directive."
   [d]
   (= "sequence-region" (:name d)))
 
