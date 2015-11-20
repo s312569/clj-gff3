@@ -61,8 +61,6 @@
   [e]
   (= (:type e) "exon"))
 
-
-
 (defn entry-range 
   "Returns the range of an entry as a set of integers."
   [e]
@@ -105,7 +103,9 @@
   (resolved? [this] (= :resolved (:name this)))
   gffString
   (gff-string [this]
-    (str "##" (:name this) \tab (:data this))))
+    (if (= (:name this) :resolved)
+      "###"
+      (str "##" (:name this) \tab (:data this)))))
 
 (defn directive? [e]
   (instance? gffDirective e))
