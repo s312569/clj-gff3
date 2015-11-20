@@ -14,7 +14,7 @@ To use require in your app:
 
 ```clojure
 (ns my-app.core
-    (:require [clj-gff.core :as gf]))
+    (:require [clj-gff3.core :as gf]))
 ```
 
 API docs can be found [here](http://s312569.github.io/clj-gff3/)
