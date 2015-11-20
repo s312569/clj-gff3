@@ -11,6 +11,9 @@
     "Returns true if entry denotes all forward references are
     resolved."))
 
+(defprotocol gffString
+  (gff-string [this]))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; entries
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -19,7 +22,20 @@
                      end score strand phase
                      attributes]
   gffResolved
-  (resolved? [this] false))
+  (resolved? [this] false)
+  gffString
+  (gff-string [this]
+    (let [k [:seqid :source :type :start :end :score :strand
+             :phase]
+          a (->> (map (fn [[k v]]
+                        (str (name k) "=" (->> v (interpose ",") (apply str))))
+                      (:attributes this))
+                 (interpose ";")
+                 (apply str))
+          e (->> (map #(get this %) k)
+                 (interpose \tab)
+                 (apply str))]
+      (str e \tab a))))
 
 (defn start
   "Returns the start field of a gffEntry as an integer."
@@ -40,6 +56,12 @@
   "Returns true if 'type' field of gffEntry equals 'gene'."
   [e]
   (= "gene" (:type e)))
+
+(defn exon?
+  [e]
+  (= (:type e) "exon"))
+
+
 
 (defn entry-range 
   "Returns the range of an entry as a set of integers."
@@ -80,7 +102,13 @@
 
 (defrecord gffDirective [name data]
   gffResolved
-  (resolved? [this] (= :resolved (:name this))))
+  (resolved? [this] (= :resolved (:name this)))
+  gffString
+  (gff-string [this]
+    (str "##" (:name this) \tab (:data this))))
+
+(defn directive? [e]
+  (instance? gffDirective e))
 
 (defn seq-region?
   "Returns true if argument is a sequence-region directive."
