@@ -1,41 +1,79 @@
 (ns clj-gff3.core
-  (:require [clj-biosequence.core :as bs]
-            [clojure.string :refer [trim split]]
+  (:require [clojure.string :refer [trim split]]
             [fs.core :refer [file?]]
-            [clojure.set :refer [difference]]))
+            [clojure.set :refer [difference]]
+            [clojure.java.io :as io]
+            [clj-fasta.core :as fs]
+            [bioreader.core :as br]
+            [clojure.string :as st]))
 
-(declare gather-consecutive)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; data structures
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defprotocol gffResolved
-  (resolved? [this]
-    "Returns true if entry denotes all forward references are
-    resolved."))
+(defrecord gffEntry [seqid source type start end score strand phase attributes])
+(defrecord gffDirective [name data])
+(defrecord gffReader [resolved gff-strm fasta-strm]
+  java.io.Closeable
+  (close [this]
+    (.close ^java.io.BufferedReader (:fasta-strm this))
+    (.close ^java.io.BufferedReader (:gff-strm this))))
 
-(defprotocol gffString
-  (gff-string [this]))
+(defmulti gff-string (fn [e] (class e)))
+(defmulti gff-directive (fn [n d] n))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; utilities
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- gather-consecutive
+  [lst]
+  (let [f (atom true)]
+    (loop [l (sort lst)
+           curr ()
+           acc ()]
+      (if-not (second l)
+        (if (= (- (first l) (first curr)) 1)
+          (cons (reverse (cons (first l) curr)) acc)
+          (cons (list (first l)) (cons (reverse curr) acc)))
+        (cond @f
+              (do (reset! f false)
+                  (recur (rest l) (list (first l)) acc))
+              (= (- (first l) (first curr)) 1)
+              (recur (rest l) (cons (first l) curr) acc)
+              :else
+              (recur (rest l) (list (first l)) (cons (reverse curr) acc)))))))
+
+(defn- parse-gff-entry
+  [line]
+  (map->gffEntry (zipmap [:seqid :source :type :start
+                          :end :score :strand :phase
+                          :attributes]
+                         (let [f (split line #"\t")
+                               a (->> (split (last f) #";")
+                                      (map #(let [f (split % #"=")]
+                                              (vector (keyword (st/lower-case (first f)))
+                                                      (split (last f) #","))))
+                                      (into {}))]
+                           (conj (vec (butlast f)) a)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; entries
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defrecord gffEntry [seqid source type start
-                     end score strand phase
-                     attributes]
-  gffResolved
-  (resolved? [this] false)
-  gffString
-  (gff-string [this]
-    (let [k [:seqid :source :type :start :end :score :strand
-             :phase]
-          a (->> (map (fn [[k v]]
-                        (str (name k) "=" (->> v (interpose ",") (apply str))))
-                      (:attributes this))
-                 (interpose ";")
-                 (apply str))
-          e (->> (map #(get this %) k)
-                 (interpose \tab)
-                 (apply str))]
-      (str e \tab a))))
+(defmethod gff-string gffEntry
+  [e]
+  (let [k [:seqid :source :type :start :end :score :strand
+           :phase]
+        a (->> (map (fn [[k v]]
+                      (str (name k) "=" (->> v (interpose ",") (apply str))))
+                    (:attributes e))
+               (interpose ";")
+               (apply str))
+        l (->> (map #(get e %) k)
+               (interpose \tab)
+               (apply str))]
+    (str l \tab a)))
 
 (defn start
   "Returns the start field of a gffEntry as an integer."
@@ -46,6 +84,38 @@
   "Returns the end field of a gffEntry as an integer."
   [e]
   (Integer/parseInt (:end e)))
+
+(defn score
+  "Returns the score field as a float or nil if none."
+  [e]
+  (if-not (= (:score e) ".")
+    (Float/parseFloat (:score e))))
+
+(defn phase
+  "Returns the phase as an integer (0, 1 or 2) or nil if none."
+  [e]
+  (if-not (= (:phase e) ".")
+    (Integer/parseInt (:phase e))))
+
+(defn seqid
+  "Returns the seqid of an entry."
+  [e]
+  (:seqid e))
+
+(defn source
+  "Returns the source of an entry."
+  [e]
+  (:source e))
+
+(defn type
+  "Returns the type of an entry."
+  [e]
+  (:type e))
+
+(defn strand
+  "Returns the strand of an entry."
+  [e]
+  (:strand e))
 
 (defn cds?
   "Returns true if 'type' field of gffEntry equals 'CDS'."
@@ -75,19 +145,6 @@
        gather-consecutive
        (map #(vector (apply min %) (apply max %)))))
 
-(defn- parse-gff-entry
-  [line]
-  (map->gffEntry (zipmap [:seqid :source :type :start
-                          :end :score :strand :phase
-                          :attributes]
-                         (let [f (split line #"\t")
-                               a (->> (split (last f) #";")
-                                      (map #(let [f (split % #"=")]
-                                              (vector (keyword (first f))
-                                                      (split (last f) #","))))
-                                      (into {}))]
-                           (conj (vec (butlast f)) a)))))
-
 (defn get-attribute
   "Returns an attribute value corresponding to the key
   argument. Always returns a vector."
@@ -98,158 +155,62 @@
 ;; directives
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defrecord gffDirective [name data]
-  gffResolved
-  (resolved? [this] (= :resolved (:name this)))
-  gffString
-  (gff-string [this]
-    (if (= (:name this) :resolved)
-      "###"
-      (str "##" (:name this) \tab (:data this)))))
+(defmethod gff-string gffDirective
+  [e]
+  (if (= (:name e) :resolved)
+    "###"
+    (str "##" (:name e) \tab (:data e))))
 
 (defn directive? [e]
   (instance? gffDirective e))
 
+(defn resolved?
+  "Returns true if directive is the resolved directive."
+  [e]
+  (= :resolved (:name e)))
+
 (defn seq-region?
-  "Returns true if argument is a sequence-region directive."
+  "Returns a vector of seqid, start and end if directive is a
+  seq-region directive. False if not."
   [d]
-  (= "sequence-region" (:name d)))
+  (if (= "sequence-region" (:name d))
+    (let [f (st/split (:data d) #"\t")]
+      (vector (first f) (Integer/parseInt (second f)) (Integer/parseInt (last f))))
+    false))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; reader
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn- gff-seq-helper
-  [line]
-  (let [l (trim line)]
-    (cond (= "###" l)
-          (->gffDirective :resolved nil)
-          (= '(\# \#) (take 2 l))
-          (let [[n d] (rest (re-find #"\#\#([^\s]+)\s+(.+)" l))]
-            (->gffDirective n d))
-          :else
-          (parse-gff-entry l))))
+(defmethod fs/fasta-line-seq gffReader
+  [r]
+  (line-seq (:fasta-strm r)))
 
-(defrecord gffReader [strm fastas]
-  bs/biosequenceReader
-  (biosequence-seq [this]
-    (if (:fastas this)
-      (bs/biosequence-seq (:fastas this))
-      (throw (Throwable. "No sequence stream. If file contains sequences initialise with 'init-gff-file' with :alphabet keyword."))))
-  (get-biosequence [this accession]
-    (if (:fastas this)
-      (bs/get-biosequence (:fastas this) accession)
-      (throw (Throwable. "No sequence stream. If file contains sequences initialise in 'init-gff-file' with :alphabet keyword."))))
-  java.io.Closeable
-  (close [this]
-    (.close ^java.io.BufferedReader (:strm this))
-    (if (:fastas this)
-      (.close (:fastas this)))))
+(defn gff-reader
+  "Returns a gffReader that can be used with fasta-seq and gff-seq."
+  [gff-file]
+  (->gffReader (atom nil) (br/bioreader gff-file) (br/bioreader gff-file)))
 
 (defn gff-seq
   "Lazy sequence of all entries and directives in a gff3 file."
   [gffreader]
-  (->> (line-seq (:strm gffreader))
+  (->> (line-seq (:gff-strm gffreader))
        (take-while #(not (or (= % "##FASTA")
                              (= \> (first %)))))
        (filter #(not (or (= "" (trim %))
                          (re-find #"^\#[^#]" %))))
-       (map gff-seq-helper)))
+       (map #(let [l (trim %)]
+               (cond (= "###" l)
+                     (do (reset! (:resolved gffreader) true)
+                         (->gffDirective :resolved nil))
+                     (= '(\# \#) (take 2 l))
+                     (let [[n d] (rest (re-find #"\#\#([^\s]+)\s+(.+)" l))]
+                       (->gffDirective n d))
+                     :else
+                     (parse-gff-entry l))))))
 
-(defn- tokenise
-  [m]
-  (let [l (:remaining m)
-        r (drop-while #(not (or (gene? %)
-                                (resolved? %)))
-                      (rest l))
-        y (let [es (drop-while #(not (or (gene? %)
-                                         (seq-region? %))) l)
-                fi (take-while #(or (gene? %)
-                                    (seq-region? %)) es)]
-            (concat fi
-                    (take-while #(not (or (gene? %)
-                                          (resolved? %)))
-                                (drop-while #(or (gene? %) (seq-region? %))
-                                            es))))]
-    (if (seq y)
-      {:yield y :remaining r}
-      {:end true})))
+(defn reader-resolved?
+  "Returns true if all forward references in the gff file have been resolved."
+  [gff-reader]
+  (:resolved gff-reader))
 
-(defn gene-seq
-  "Returns a lazy list of vectors containing entries describing
-  genes."
-  [gffreader]
-  (let [e (drop-while #(not (= "gene" (:type %)))
-                      (gff-seq gffreader))]
-    (->> {:remaining e}
-         (iterate tokenise)
-         rest
-         (take-while #(not (contains? % :end)))
-         (map #(vec (:yield %))))))
-
-(defn get-fasta
-  "Returns a fastaSequence (see clj-biosequence) from a gff3 file
-  containing fasta sequences."
-  [gffreader accession]
-  (bs/get-biosequence gffreader accession))
-
-(defn fasta-seq
-  "Returns a lazy list of fasta sequence records (see clj-biosequence)
-  in a gff file."
-  [reader]
-  (bs/biosequence-seq reader))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; file
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defrecord gffFile [file alphabet opts])
-
-(extend gffFile
-  bs/biosequenceFile
-  bs/default-biosequence-file)
-
-(defn gff-reader
-  [gff-file]
-  (let [i (if (:alphabet gff-file)
-            (bs/bs-reader (bs/index-biosequence-file
-                           (apply bs/init-fasta-file
-                                  (bs/bs-path gff-file)
-                                  (:alphabet gff-file)
-                                  (:opts gff-file)))))]
-    (->gffReader (apply bs/bioreader (bs/bs-path gff-file)
-                        (:opts gff-file))
-                 i)))
-
-(defn init-gff-file
-  "Initialises a gffFile. If the keyword argument is specified with an
-  argument compatible with the clj-biosequence package then the reaser
-  can also provide a stream of fasta sequences that are in the
-  file (see clj-biosequence)."
-  [path & opts]
-  (if (file? path)
-    (->gffFile path (:alphabet (apply hash-map opts))
-               (concat '(:junk true) opts))
-    (throw (Throwable. (str "File not found: " path)))))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; utilities
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defn- gather-consecutive
-  [lst]
-  (let [f (atom true)]
-    (loop [l (sort lst)
-           curr ()
-           acc ()]
-      (if-not (second l)
-        (if (= (- (first l) (first curr)) 1)
-          (cons (reverse (cons (first l) curr)) acc)
-          (cons (list (first l)) (cons (reverse curr) acc)))
-        (cond @f
-              (do (reset! f false)
-                  (recur (rest l) (list (first l)) acc))
-              (= (- (first l) (first curr)) 1)
-              (recur (rest l) (cons (first l) curr) acc)
-              :else
-              (recur (rest l) (list (first l)) (cons (reverse curr) acc)))))))
