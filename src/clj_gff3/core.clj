@@ -107,7 +107,7 @@
   [e]
   (:source e))
 
-(defn type
+(defn entry-type
   "Returns the type of an entry."
   [e]
   (:type e))
