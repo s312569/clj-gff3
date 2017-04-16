@@ -7,7 +7,7 @@ A gff3 parsing library for Clojure
 To get from Clojars put the following in your project.clj file:
 
 ```clojure
-[clj-gff3 "0.1.4"]
+[clj-gff3 "0.1.5"]
 ```
 
 To use require in your app:
