@@ -117,6 +117,11 @@
   [e]
   (:strand e))
 
+(defn positive?
+  "Returns true if positive stranded entry."
+  [e]
+  (= (strand e) "+"))
+
 (defn cds?
   "Returns true if 'type' field of gffEntry equals 'CDS'."
   [e]
